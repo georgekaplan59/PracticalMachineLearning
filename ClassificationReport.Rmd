@@ -1,16 +1,19 @@
 Course Project: Classification Report
 ========================================================
 
+Introduction
+------------
 The goal of this project is to predict the manner in which wearable device 
 users did the exercise. This is the `classe` variable in the training set. We
-may use any of the other variables to predict with. You should create a report describing:
+may use any of the other variables to predict with. In this report you wil 
+find:
 
-* how you built your model, 
-* how you used cross validation, 
-* what you think the expected out of sample error is, and 
-* why you made the choices you did. 
+* how the model was built, 
+* how cross validation was used, 
+* an estimation of the out of sample error, and 
+* the reasons why we opted for an algorithm. 
 
-You will also use your prediction model to predict 20 different test cases.
+Finally, some predictions for the test are performed.
 
 
 
@@ -22,16 +25,9 @@ the available data in the test set in order to choose the predictors:
 
 ```{r}
 # Loading data
-full.trainset = read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
-full.testset = read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+full.trainset = read.csv("../pml-training.csv")
+full.testset = read.csv("../pml-testing.csv")
 non.NA.columns = colMeans(is.na(full.testset)) == 0
-head(non.NA.columns,10)
-
-# Preparation for machine learning algorithms
-library(caret)
-library(doParallel)  # Multiple cores computation
-rCluster <- makePSOCKcluster(2)  # Use 2 cores (in my case n-2 = 2)
-registerDoParallel(rCluster)
 ```
 
 The first seven columns also don't seem to be useful to predict:
@@ -55,7 +51,13 @@ predictive algorith in each case. In order to estimate the out-of-sample error
 we use the 40% of the training set as a validation set. This porportion is huge
 but our training set has enough records to do that.
 
-```{r}
+```{r ,message=FALSE}
+# Preparation for machine learning algorithms
+library(caret)
+library(doParallel)  # Multiple cores computation
+rCluster <- makePSOCKcluster(2)  # Use 2 cores (in my case n-2 = 2)
+registerDoParallel(rCluster)
+
 # 10-fold CV
 fitControl = trainControl(method = "cv", number = 10)
 
@@ -84,10 +86,10 @@ The training method used in this report are:
 
 
 
-### Tree model
+### Tree model (CART)
 The training results are shown below:
 
-```{r tree_model, cache=TRUE}
+```{r ,cache=TRUE,message=FALSE}
 tree.model = train(classe ~ ., data=trainset, method="rpart", 
                    trControl=fitControl, 
                    tuneGrid=expand.grid(.cp = (0:50)*0.01))
@@ -103,6 +105,7 @@ confusionMatrix(predictions, trainset$classe)
 # Prediction on the validation set: Out-of-sample error
 predictions = predict(tree.model$finalModel, validationset, type="class")
 confusionMatrix(predictions, validationset$classe)
+tree.outofsample.error = (confusionMatrix(predictions, validationset$classe))$overall[1]
 ```
 
 The predictions on the test set are:
@@ -120,7 +123,7 @@ tree.predictions
 In this case we don't use cross-validation due to the way in which random 
 forest is built:
 
-```{r random_forest, cache=TRUE}
+```{r ,message=FALSE}
 set.seed(123)
 rf.model = train(classe ~ ., method="parRF", data=trainset,
                  tuneGrid=data.frame(mtry=3), 
@@ -137,6 +140,7 @@ confusionMatrix(predictions, trainset$classe)
 # Prediction on the validation set: Out-of-sample error
 predictions = predict(rf.model$finalModel, validationset, type="class")
 confusionMatrix(predictions, validationset$classe)
+rf.outofsample.error = (confusionMatrix(predictions, validationset$classe))$overall[1]
 ```
 
 The predictions on the test set are:
@@ -153,7 +157,7 @@ rf.predictions
 ### Bagging
 The training results are shown below:
 
-```{r bagging, cache=TRUE}
+```{r ,cache=TRUE,message=FALSE}
 set.seed(123)
 bag.model = train(classe ~ ., method="treebag", data=trainset, 
                   trControl=fitControl)
@@ -169,6 +173,7 @@ confusionMatrix(predictions, trainset$classe)
 # Prediction on the validation set: Out-of-sample error
 predictions = predict(bag.model$finalModel, validationset, type="class")
 confusionMatrix(predictions, validationset$classe)
+bag.outofsample.error = (confusionMatrix(predictions, validationset$classe))$overall[1]
 ```
 
 The predictions on the test set are:
@@ -185,7 +190,7 @@ bag.predictions
 ### LDA model
 The training results are shown below:
 
-```{r lda_model, cache=TRUE}
+```{r ,cache=TRUE,message=FALSE}
 lda.model = train(classe ~ ., method="lda", data=trainset, 
                   trControl=fitControl)
 lda.model$results
@@ -200,7 +205,7 @@ don't use this model to predict.
 ### Naive Bayes model
 The training results are shown below:
 
-```{r nb_model, cache=TRUE}
+```{r ,cache=TRUE,message=FALSE}
 # Naive Bayes
 nb.model = train(classe ~ ., method="nb", data=trainset,
                  tuneGrid = data.frame(usekernel=TRUE, fL=0),
@@ -216,20 +221,26 @@ promising, so we don't use this model to predict.
 
 Test set predictions comparison
 -------------------------------
-
 The main algorithms output are summarized in the next data frame:
 
 ```{r}
-comparison = data.frame(tree=as.vector(tree.predictions),
+comparison = data.frame(cart=as.vector(tree.predictions),
                         rf=as.vector(rf.predictions),
                         bag=bag.predictions)
 comparison
+
+# Algorithm performance: Out-of-sample error
+out.of.sample.errors = c(as.numeric(1-tree.outofsample.error),
+                         as.numeric(1-rf.outofsample.error),
+                         as.numeric(1-bag.outofsample.error))
+names(out.of.sample.errors) = c("CART","RF","Bagging")
+out.of.sample.errors
 ```
 
 As you can see, bagging and random forest predict the same results and their
-accuracy is good enough. Therefore, any of them are useful to generate the
-prediction files. We opt for random forest because it is much faster in our
-case.
+out-of-sample error is small enough. Therefore, any of them are useful to
+generate the prediction files. We opt for random forest because it is much
+faster in our case.
 
 
 
