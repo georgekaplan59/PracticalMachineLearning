@@ -1,0 +1,255 @@
+Course Project: Classification Report
+========================================================
+
+The goal of this project is to predict the manner in which wearable device 
+users did the exercise. This is the `classe` variable in the training set. We
+may use any of the other variables to predict with. You should create a report describing:
+
+* how you built your model, 
+* how you used cross validation, 
+* what you think the expected out of sample error is, and 
+* why you made the choices you did. 
+
+You will also use your prediction model to predict 20 different test cases.
+
+
+
+
+Exploratory data analysis
+-------------------------
+As we have to predict the expected value for the test set, we opt to check
+the available data in the test set in order to choose the predictors:
+
+```{r}
+# Loading data
+full.trainset = read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+full.testset = read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+non.NA.columns = colMeans(is.na(full.testset)) == 0
+head(non.NA.columns,10)
+
+# Preparation for machine learning algorithms
+library(caret)
+library(doParallel)  # Multiple cores computation
+rCluster <- makePSOCKcluster(2)  # Use 2 cores (in my case n-2 = 2)
+registerDoParallel(rCluster)
+```
+
+The first seven columns also don't seem to be useful to predict:
+
+1. `X`: row index
+2. `user_name`: username
+3. `raw_timestamp_part_1`: timestamp
+4. `raw_timestamp_part_2`: timestamp
+5. `cvtd_timestamp`: date
+6. `new_window`: 
+7. `num_window`:
+
+So we exclude them from the selected variables to train algorithms:
+
+```{r}
+non.NA.columns[1:7] = rep(FALSE,7)
+```
+
+We are going to use cross-validation with 10 folds to calculate the best 
+predictive algorith in each case. In order to estimate the out-of-sample error
+we use the 40% of the training set as a validation set. This porportion is huge
+but our training set has enough records to do that.
+
+```{r}
+# 10-fold CV
+fitControl = trainControl(method = "cv", number = 10)
+
+# Redefining trainset and testset by excluding NA columns
+trainset = full.trainset[, non.NA.columns]
+inValidation = createDataPartition(trainset$classe, p=0.4, list=FALSE)
+validationset = trainset[inValidation,] # for out-of-sample error estimation
+trainset = trainset[-inValidation,]
+testset = full.testset[, non.NA.columns]
+```
+
+
+
+
+Predictive models
+-----------------
+
+The training method used in this report are:
+
+* CART (Classification And Regression Trees)
+* Random forest
+* Bagging
+* LDA (Linear Discriminant Analysis)
+* Naive Bayes
+
+
+
+
+### Tree model
+The training results are shown below:
+
+```{r tree_model, cache=TRUE}
+tree.model = train(classe ~ ., data=trainset, method="rpart", 
+                   trControl=fitControl, 
+                   tuneGrid=expand.grid(.cp = (0:50)*0.01))
+tree.model$results[1,]
+```
+
+The confusion matrix for the training set and the validation set are:
+
+```{r}
+# Prediction on the training set
+predictions = predict(tree.model$finalModel, trainset, type="class")
+confusionMatrix(predictions, trainset$classe)
+# Prediction on the validation set: Out-of-sample error
+predictions = predict(tree.model$finalModel, validationset, type="class")
+confusionMatrix(predictions, validationset$classe)
+```
+
+The predictions on the test set are:
+
+```{r}
+# Prediction on the testset
+tree.predictions = predict(tree.model$finalModel, testset, type="class")
+tree.predictions
+```
+
+
+
+
+### Random forest
+In this case we don't use cross-validation due to the way in which random 
+forest is built:
+
+```{r random_forest, cache=TRUE}
+set.seed(123)
+rf.model = train(classe ~ ., method="parRF", data=trainset,
+                 tuneGrid=data.frame(mtry=3), 
+                 trControl=trainControl(method="none"))
+
+```
+
+The confusion matrix for the training set and the validation set are:
+
+```{r}
+# Prediction on the training set
+predictions = predict(rf.model$finalModel, trainset, type="class")
+confusionMatrix(predictions, trainset$classe)
+# Prediction on the validation set: Out-of-sample error
+predictions = predict(rf.model$finalModel, validationset, type="class")
+confusionMatrix(predictions, validationset$classe)
+```
+
+The predictions on the test set are:
+
+```{r}
+# Prediction on the testset
+rf.predictions = predict(rf.model$finalModel, testset, type="class")
+rf.predictions
+```
+
+
+
+
+### Bagging
+The training results are shown below:
+
+```{r bagging, cache=TRUE}
+set.seed(123)
+bag.model = train(classe ~ ., method="treebag", data=trainset, 
+                  trControl=fitControl)
+bag.model$results
+```
+
+The confusion matrix for the training set and the validation set are:
+
+```{r}
+# Prediction on the training set
+predictions = predict(bag.model$finalModel, trainset, type="class")
+confusionMatrix(predictions, trainset$classe)
+# Prediction on the validation set: Out-of-sample error
+predictions = predict(bag.model$finalModel, validationset, type="class")
+confusionMatrix(predictions, validationset$classe)
+```
+
+The predictions on the test set are:
+
+```{r}
+# Prediction on the testset
+bag.predictions = predict(bag.model$finalModel, testset, type="class")
+bag.predictions
+```
+
+
+
+
+### LDA model
+The training results are shown below:
+
+```{r lda_model, cache=TRUE}
+lda.model = train(classe ~ ., method="lda", data=trainset, 
+                  trControl=fitControl)
+lda.model$results
+```
+
+In this case, as the accuracy in the training set is not very promising we
+don't use this model to predict.
+
+
+
+
+### Naive Bayes model
+The training results are shown below:
+
+```{r nb_model, cache=TRUE}
+# Naive Bayes
+nb.model = train(classe ~ ., method="nb", data=trainset,
+                 tuneGrid = data.frame(usekernel=TRUE, fL=0),
+                 trControl=fitControl)
+nb.model$results
+```
+
+Likewise in the previous case, the accuracy in the training set is not very
+promising, so we don't use this model to predict.
+
+
+
+
+Test set predictions comparison
+-------------------------------
+
+The main algorithms output are summarized in the next data frame:
+
+```{r}
+comparison = data.frame(tree=as.vector(tree.predictions),
+                        rf=as.vector(rf.predictions),
+                        bag=bag.predictions)
+comparison
+```
+
+As you can see, bagging and random forest predict the same results and their
+accuracy is good enough. Therefore, any of them are useful to generate the
+prediction files. We opt for random forest because it is much faster in our
+case.
+
+
+
+
+Test set prediction output
+--------------------------
+
+The following function generates one file containing the prediction for each
+record in the test set.
+
+```{r}
+# Function to create the output files
+pml_write_files = function(x,folder){
+    n = length(x)
+    for(i in 1:n) {
+        filename = paste0("problem_id_",i,".txt")
+        write.table(x[i], file=paste(folder, "/", filename), 
+                    quote=FALSE, row.names=FALSE,
+                    col.names=FALSE)
+    }
+}
+```
+
